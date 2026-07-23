@@ -203,8 +203,7 @@
       vertical-align: top;
     }
 
-    td.topic { min-width: 160px; }
-    td.unit { min-width: 110px; }
+    td.topic { min-width: 200px; }
     td.teacher { min-width: 130px; }
 
     .conflict { background: var(--red); }
@@ -239,6 +238,7 @@
     <span class="sync-dot" id="syncDot"></span>
     <span id="syncStatus">Connect to GitHub to start syncing.</span>
     <button class="secondary small-button" onclick="toggleSetup()">GitHub setup</button>
+    <button class="secondary small-button" onclick="saveNow()">Save now</button>
     <button class="secondary small-button" onclick="refreshNow()">Refresh now</button>
     <a id="historyLink" class="small" href="#" target="_blank" rel="noopener">View commits on GitHub</a>
   </div>
@@ -306,10 +306,10 @@
     var CONFIG_KEY = "contentCoordinatorGithubConfig";
     var TOKEN_KEY = "contentCoordinatorGithubToken";
     var PLAN_PATH = "plan.json";
-    var POLL_MS = 5000;
-    var SAVE_DEBOUNCE_MS = 500;
+    var POLL_MS = 8000;
+    var SAVE_DEBOUNCE_MS = 800;
     var HISTORY_REFRESH_MS = 30000;
-    var PUSH_GRACE_MS = 20000;
+    var POLL_PAUSE_AFTER_SAVE_MS = 25000;
 
     var defaultState = {
       teachers: ["Teacher A", "Teacher B", "Teacher C"],
@@ -318,13 +318,13 @@
       lessons: [
         {
           items: [
-            { unit: "Unit 1", topic: "Introduction", minutes: 15, teacher: "" },
-            { unit: "Unit 1", topic: "Core concept", minutes: 25, teacher: "" }
+            { topic: "Introduction", minutes: 15, teacher: "" },
+            { topic: "Core concept", minutes: 25, teacher: "" }
           ]
         },
         {
           items: [
-            { unit: "Unit 1", topic: "Activity / discussion", minutes: 30, teacher: "" }
+            { topic: "Activity / discussion", minutes: 30, teacher: "" }
           ]
         }
       ]
@@ -336,15 +336,13 @@
     var remoteSha = null;
     var syncedJson = null;
     var pollTimer = null;
+    var pollPausedUntil = 0;
     var saveTimer = null;
-    var pendingCommitMessage = "";
-    var isPushing = false;
-    var pushRetryCount = 0;
-    var pushQueued = false;
+    var saveInFlight = false;
+    var saveQueued = false;
+    var pendingCommitMessage = "Updated plan";
     var historyTimer = null;
     var lastHistoryLoad = 0;
-    var lastPushedSha = null;
-    var lastPushTime = 0;
 
     try {
       var savedPlan = localStorage.getItem(STORAGE_KEY);
@@ -456,19 +454,22 @@
     }
 
     function stateJson() {
+      normalise();
       return JSON.stringify(state);
     }
 
     function hasLocalChanges() {
-      return syncedJson !== null && stateJson() !== syncedJson;
+      if (syncedJson === null) return false;
+      normalise();
+      return JSON.stringify(state) !== syncedJson;
     }
 
     function markSynced() {
       syncedJson = stateJson();
     }
 
-    function hasPendingSave() {
-      return !!(isPushing || saveTimer);
+    function isPollPaused() {
+      return Date.now() < pollPausedUntil || saveInFlight || saveTimer || hasLocalChanges();
     }
 
     function encodeBase64Utf8(text) {
@@ -484,29 +485,24 @@
       return btoa(binary);
     }
 
-    function shouldIgnoreRemoteUpdate(remoteShaFromPoll, remoteJson) {
-      if (hasLocalChanges() || hasPendingSave()) return true;
-
-      if (lastPushedSha && remoteShaFromPoll === lastPushedSha) return false;
-
-      if (lastPushTime && Date.now() - lastPushTime < PUSH_GRACE_MS) {
-        return remoteJson !== syncedJson;
-      }
-
-      return false;
+    function decodeGitHubContent(content) {
+      return JSON.parse(decodeURIComponent(escape(atob(content.replace(/\n/g, "")))));
     }
 
-    async function refreshFromGitHub(forceApply, onlyUpdateSha) {
+    async function refreshFromGitHub(forceApply) {
       if (!isConnected()) return;
 
       try {
         var response = await fetch(apiUrl("/contents/" + PLAN_PATH + "?ref=" + githubConfig.branch), {
-          headers: githubHeaders()
+          headers: githubHeaders(),
+          cache: "no-store"
         });
 
         if (response.status === 404) {
-          setSyncStatus("pending", "plan.json not found — saving initial plan…");
-          await pushToGitHub("Initial plan created by " + githubConfig.userName);
+          if (!saveInFlight) {
+            setSyncStatus("pending", "Creating plan on GitHub…");
+            await flushSave("Initial plan created by " + githubConfig.userName);
+          }
           return;
         }
 
@@ -514,38 +510,30 @@
 
         var payload = await response.json();
         remoteSha = payload.sha;
-
-        if (onlyUpdateSha) return;
-
-        var remoteState = JSON.parse(decodeURIComponent(escape(atob(payload.content.replace(/\n/g, "")))));
-        var remoteJson = JSON.stringify(remoteState);
+        var remoteState = decodeGitHubContent(payload.content);
 
         if (forceApply) {
           applyRemoteState(remoteState);
-          setSyncStatus("live", "Synced with GitHub · updated " + new Date().toLocaleTimeString());
+          setSyncStatus("live", "Loaded from GitHub · " + new Date().toLocaleTimeString());
           return;
         }
 
-        if (hasPendingSave() || hasLocalChanges()) {
-          setSyncStatus("pending", isPushing ? "Syncing…" : "Editing…");
-          return;
-        }
-
-        if (shouldIgnoreRemoteUpdate(payload.sha, remoteJson)) {
-          if (payload.sha === lastPushedSha) {
-            markSynced();
-            setSyncStatus("live", "Saved · " + new Date().toLocaleTimeString());
-          } else {
-            setSyncStatus("live", "Saved · confirming with GitHub…");
+        if (isPollPaused()) {
+          if (saveInFlight || saveTimer) {
+            setSyncStatus("pending", "Syncing…");
+          } else if (hasLocalChanges()) {
+            setSyncStatus("pending", "Unsaved changes");
           }
           return;
         }
 
+        var remoteJson = JSON.stringify(remoteState);
         if (stateJson() !== remoteJson) {
           applyRemoteState(remoteState);
           setSyncStatus("live", "Updated from GitHub · " + new Date().toLocaleTimeString());
         } else {
-          setSyncStatus("live", "Synced with GitHub · " + new Date().toLocaleTimeString());
+          markSynced();
+          setSyncStatus("live", "Up to date · " + new Date().toLocaleTimeString());
         }
       } catch (error) {
         setSyncStatus("error", "Sync error: " + error.message);
@@ -554,6 +542,7 @@
 
     function applyRemoteState(remoteState) {
       state = remoteState;
+      normalise();
       markSynced();
       saveLocal();
       render(false);
@@ -563,28 +552,53 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }
 
-    function schedulePush(message, immediate) {
-      if (!isConnected()) return;
-
-      if (!isPushing && !pushQueued) pushRetryCount = 0;
-      pendingCommitMessage = message;
-
-      if (saveTimer) clearTimeout(saveTimer);
-
-      if (immediate) {
-        saveTimer = null;
-        setSyncStatus("pending", "Syncing…");
-        pushToGitHub(pendingCommitMessage);
+    function scheduleSave(message) {
+      if (!isConnected()) {
+        saveLocal();
+        setSyncStatus("", "Connect to GitHub to sync.");
         return;
       }
 
-      setSyncStatus("pending", "Editing…");
+      pendingCommitMessage = message;
+      saveLocal();
+      setSyncStatus("pending", "Unsaved changes");
 
+      if (saveTimer) clearTimeout(saveTimer);
       saveTimer = setTimeout(function () {
         saveTimer = null;
-        setSyncStatus("pending", "Syncing…");
-        pushToGitHub(pendingCommitMessage);
+        flushSave(pendingCommitMessage);
       }, SAVE_DEBOUNCE_MS);
+    }
+
+    function scheduleSaveNow(message) {
+      pendingCommitMessage = message;
+      saveLocal();
+
+      if (!isConnected()) {
+        setSyncStatus("", "Connect to GitHub to sync.");
+        return;
+      }
+
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+
+      flushSave(message);
+    }
+
+    function saveNow() {
+      if (!isConnected()) {
+        alert("Connect to GitHub first.");
+        return;
+      }
+
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+      }
+
+      flushSave(pendingCommitMessage || "Manual save");
     }
 
     function refreshNow() {
@@ -594,7 +608,8 @@
 
     async function fetchRemoteSha() {
       var head = await fetch(apiUrl("/contents/" + PLAN_PATH + "?ref=" + githubConfig.branch), {
-        headers: githubHeaders()
+        headers: githubHeaders(),
+        cache: "no-store"
       });
 
       if (head.status === 404) {
@@ -604,33 +619,33 @@
 
       if (!head.ok) throw new Error("Could not read plan version (" + head.status + ")");
 
-      var headPayload = await head.json();
-      remoteSha = headPayload.sha;
+      remoteSha = (await head.json()).sha;
     }
 
-    async function pushToGitHub(message) {
+    async function flushSave(message, attempt) {
       if (!isConnected()) return;
 
-      if (isPushing) {
-        pushQueued = true;
+      if (saveInFlight) {
+        saveQueued = true;
         pendingCommitMessage = message;
         return;
       }
 
-      isPushing = true;
+      if (attempt === undefined) attempt = 0;
+      saveInFlight = true;
+      setSyncStatus("pending", "Syncing…");
+
       normalise();
-      var pushedJson = stateJson();
+      var payloadJson = stateJson();
       saveLocal();
+      var saveSucceeded = false;
 
       try {
         await fetchRemoteSha();
 
-        var prettyJson = JSON.stringify(JSON.parse(pushedJson), null, 2);
-        var content = encodeBase64Utf8(prettyJson);
-
         var body = {
           message: githubConfig.userName + ": " + message,
-          content: content,
+          content: encodeBase64Utf8(JSON.stringify(JSON.parse(payloadJson), null, 2)),
           branch: githubConfig.branch
         };
 
@@ -642,20 +657,12 @@
           body: JSON.stringify(body)
         });
 
-        if (response.status === 409) {
-          if (pushRetryCount < 3) {
-            pushRetryCount += 1;
-            setSyncStatus("pending", "Syncing… (retry " + pushRetryCount + ")");
-            isPushing = false;
-            await fetchRemoteSha();
-            await pushToGitHub(message);
-            return;
-          }
-
-          throw new Error("Save conflict — wait a few seconds, then try changing the value again.");
+        if (response.status === 409 && attempt < 3) {
+          saveInFlight = false;
+          await fetchRemoteSha();
+          await flushSave(message, attempt + 1);
+          return;
         }
-
-        pushRetryCount = 0;
 
         if (!response.ok) {
           var err = await response.json().catch(function () { return {}; });
@@ -664,25 +671,21 @@
 
         var result = await response.json();
         remoteSha = result.content.sha;
-        lastPushedSha = result.content.sha;
-        lastPushTime = Date.now();
-        syncedJson = pushedJson;
-
-        if (stateJson() !== pushedJson) {
-          schedulePush("Continued edits", true);
-        } else {
-          setSyncStatus("live", "Saved · " + new Date().toLocaleTimeString());
-        }
-
+        syncedJson = payloadJson;
+        pollPausedUntil = Date.now() + POLL_PAUSE_AFTER_SAVE_MS;
+        saveSucceeded = true;
+        setSyncStatus("live", "Saved · " + new Date().toLocaleTimeString());
         scheduleHistoryRefresh();
       } catch (error) {
         setSyncStatus("error", "Save failed: " + error.message);
       } finally {
-        isPushing = false;
+        saveInFlight = false;
 
-        if (pushQueued) {
-          pushQueued = false;
-          schedulePush(pendingCommitMessage, true);
+        if (saveQueued) {
+          saveQueued = false;
+          flushSave(pendingCommitMessage);
+        } else if (saveSucceeded && hasLocalChanges()) {
+          flushSave(pendingCommitMessage);
         }
       }
     }
@@ -736,7 +739,6 @@
     }
 
     function describeField(field) {
-      if (field === "unit") return "unit";
       if (field === "topic") return "topic";
       if (field === "minutes") return "minutes";
       if (field === "teacher") return "teacher";
@@ -765,10 +767,10 @@
         if (!Array.isArray(lesson.items)) lesson.items = [];
 
         lesson.items.forEach(function (item) {
-          if (item.unit === undefined || item.unit === null) item.unit = "";
           if (item.topic === undefined || item.topic === null) item.topic = "";
           if (item.teacher === undefined || item.teacher === null) item.teacher = "";
           item.minutes = Math.max(0, Number(item.minutes) || 0);
+          delete item.unit;
         });
       });
     }
@@ -822,7 +824,6 @@
             <table>
               <thead>
                 <tr>
-                  <th>Unit</th>
                   <th>Topic / class content</th>
                   <th>Minutes</th>
                   <th>Teacher</th>
@@ -833,7 +834,7 @@
       `;
 
       if (lesson.items.length === 0) {
-        html += `<tr><td colspan="5" class="small">No content has been added yet.</td></tr>`;
+        html += `<tr><td colspan="4" class="small">No content has been added yet.</td></tr>`;
       }
 
       lesson.items.forEach(function (item, itemIndex) {
@@ -850,11 +851,6 @@
 
         html += `
           <tr>
-            <td class="unit">
-              <input type="text" value="${escapeHTML(item.unit)}"
-                oninput="editItemLive(${lessonIndex}, ${itemIndex}, 'unit', this.value)"
-                onchange="editItem(${lessonIndex}, ${itemIndex}, 'unit', this.value)">
-            </td>
             <td class="topic">
               <input type="text" value="${escapeHTML(item.topic)}"
                 oninput="editItemLive(${lessonIndex}, ${itemIndex}, 'topic', this.value)"
@@ -932,7 +928,7 @@
       }
 
       saveLocal();
-      schedulePush(
+      scheduleSave(
         "Updated " + describeField(field) + " in " + describeLocation(lessonIndex, itemIndex) +
         " to \"" + String(value).slice(0, 80) + "\""
       );
@@ -949,30 +945,28 @@
       validate();
 
       if (field === "teacher") {
-        schedulePush(
+        scheduleSaveNow(
           "Updated teacher in " + describeLocation(lessonIndex, itemIndex) +
-          " to \"" + String(value).slice(0, 80) + "\"",
-          true
+          " to \"" + String(value).slice(0, 80) + "\""
         );
       }
     }
 
     function addItem(lessonIndex) {
       state.lessons[lessonIndex].items.push({
-        unit: "",
         topic: "",
         minutes: 20,
         teacher: ""
       });
 
       render();
-      schedulePush("Added content row in " + describeLocation(lessonIndex), true);
+      scheduleSaveNow("Added content row in " + describeLocation(lessonIndex));
     }
 
     function removeItem(lessonIndex, itemIndex) {
       state.lessons[lessonIndex].items.splice(itemIndex, 1);
       render();
-      schedulePush("Removed content row from " + describeLocation(lessonIndex, itemIndex), true);
+      scheduleSaveNow("Removed content row from " + describeLocation(lessonIndex, itemIndex));
     }
 
     function addTeacher() {
@@ -988,7 +982,7 @@
 
       state.teachers.push(name);
       render();
-      schedulePush("Added teacher \"" + name + "\"", true);
+      scheduleSaveNow("Added teacher \"" + name + "\"");
     }
 
     function applyPlanSetting(field, rawValue) {
@@ -999,10 +993,9 @@
       state[field] = value;
       normalise();
       render();
-      schedulePush(
+      scheduleSaveNow(
         "Changed " + (field === "sessions" ? "total lessons" : "lessons per week") +
-        " to " + value,
-        true
+        " to " + value
       );
       return true;
     }
@@ -1064,7 +1057,7 @@
 
     function exportCSV() {
       var rows = [[
-        "Week", "Lesson", "Unit", "Topic / class content", "Minutes", "Teacher"
+        "Week", "Lesson", "Topic / class content", "Minutes", "Teacher"
       ]];
 
       state.lessons.forEach(function (lesson, lessonIndex) {
@@ -1072,7 +1065,6 @@
           rows.push([
             "Week " + weekNumber(lessonIndex),
             lessonLabel(lessonIndex),
-            item.unit,
             item.topic,
             item.minutes,
             item.teacher
@@ -1102,7 +1094,7 @@
 
       state = JSON.parse(JSON.stringify(defaultState));
       render();
-      schedulePush("Reset plan to default example", true);
+      scheduleSaveNow("Reset plan to default example");
     }
 
     render(false);
