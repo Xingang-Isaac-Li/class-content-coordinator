@@ -278,12 +278,16 @@
 
     <label>
       Total lessons:
-      <input id="sessionCount" type="number" min="1" max="60" onchange="changeSessions(this.value)">
+      <input id="sessionCount" type="number" min="1" max="60"
+        onkeydown="if (event.key === 'Enter') { this.blur(); }"
+        onblur="changeSessions(this.value)">
     </label>
 
     <label>
       Lessons per week:
-      <input id="lessonsPerWeek" type="number" min="1" max="2" onchange="changeLessonsPerWeek(this.value)">
+      <input id="lessonsPerWeek" type="number" min="1" max="2"
+        onkeydown="if (event.key === 'Enter') { this.blur(); }"
+        onblur="changeLessonsPerWeek(this.value)">
     </label>
 
     <button class="secondary" onclick="exportCSV()">Export CSV for Excel</button>
@@ -305,6 +309,7 @@
     var POLL_MS = 5000;
     var SAVE_DEBOUNCE_MS = 500;
     var HISTORY_REFRESH_MS = 30000;
+    var PUSH_GRACE_MS = 20000;
 
     var defaultState = {
       teachers: ["Teacher A", "Teacher B", "Teacher C"],
@@ -338,6 +343,8 @@
     var pushQueued = false;
     var historyTimer = null;
     var lastHistoryLoad = 0;
+    var lastPushedSha = null;
+    var lastPushTime = 0;
 
     try {
       var savedPlan = localStorage.getItem(STORAGE_KEY);
@@ -464,6 +471,31 @@
       return !!(isPushing || saveTimer);
     }
 
+    function encodeBase64Utf8(text) {
+      var bytes = new TextEncoder().encode(text);
+      var binary = "";
+      var chunkSize = 8192;
+
+      for (var i = 0; i < bytes.length; i += chunkSize) {
+        var chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, chunk);
+      }
+
+      return btoa(binary);
+    }
+
+    function shouldIgnoreRemoteUpdate(remoteShaFromPoll, remoteJson) {
+      if (hasLocalChanges() || hasPendingSave()) return true;
+
+      if (lastPushedSha && remoteShaFromPoll === lastPushedSha) return false;
+
+      if (lastPushTime && Date.now() - lastPushTime < PUSH_GRACE_MS) {
+        return remoteJson !== syncedJson;
+      }
+
+      return false;
+    }
+
     async function refreshFromGitHub(forceApply, onlyUpdateSha) {
       if (!isConnected()) return;
 
@@ -499,6 +531,16 @@
           return;
         }
 
+        if (shouldIgnoreRemoteUpdate(payload.sha, remoteJson)) {
+          if (payload.sha === lastPushedSha) {
+            markSynced();
+            setSyncStatus("live", "Saved · " + new Date().toLocaleTimeString());
+          } else {
+            setSyncStatus("live", "Saved · confirming with GitHub…");
+          }
+          return;
+        }
+
         if (stateJson() !== remoteJson) {
           applyRemoteState(remoteState);
           setSyncStatus("live", "Updated from GitHub · " + new Date().toLocaleTimeString());
@@ -524,7 +566,7 @@
     function schedulePush(message, immediate) {
       if (!isConnected()) return;
 
-      pushRetryCount = 0;
+      if (!isPushing && !pushQueued) pushRetryCount = 0;
       pendingCommitMessage = message;
 
       if (saveTimer) clearTimeout(saveTimer);
@@ -576,13 +618,15 @@
       }
 
       isPushing = true;
+      normalise();
       var pushedJson = stateJson();
       saveLocal();
 
       try {
-        if (!remoteSha) await fetchRemoteSha();
+        await fetchRemoteSha();
 
-        var content = btoa(unescape(encodeURIComponent(JSON.stringify(JSON.parse(pushedJson), null, 2))));
+        var prettyJson = JSON.stringify(JSON.parse(pushedJson), null, 2);
+        var content = encodeBase64Utf8(prettyJson);
 
         var body = {
           message: githubConfig.userName + ": " + message,
@@ -599,16 +643,16 @@
         });
 
         if (response.status === 409) {
-          if (pushRetryCount < 2) {
+          if (pushRetryCount < 3) {
             pushRetryCount += 1;
-            setSyncStatus("pending", "Syncing…");
+            setSyncStatus("pending", "Syncing… (retry " + pushRetryCount + ")");
             isPushing = false;
             await fetchRemoteSha();
             await pushToGitHub(message);
             return;
           }
 
-          throw new Error("Could not save — please click Refresh now, then try again.");
+          throw new Error("Save conflict — wait a few seconds, then try changing the value again.");
         }
 
         pushRetryCount = 0;
@@ -620,6 +664,8 @@
 
         var result = await response.json();
         remoteSha = result.content.sha;
+        lastPushedSha = result.content.sha;
+        lastPushTime = Date.now();
         syncedJson = pushedJson;
 
         if (stateJson() !== pushedJson) {
@@ -945,16 +991,28 @@
       schedulePush("Added teacher \"" + name + "\"", true);
     }
 
-    function changeSessions(value) {
-      state.sessions = Math.max(1, Math.min(60, Number(value) || 6));
+    function applyPlanSetting(field, rawValue) {
+      var value = Math.max(1, Math.min(field === "sessions" ? 60 : 2, Number(rawValue) || 0));
+      if (!value) return false;
+      if (state[field] === value) return false;
+
+      state[field] = value;
+      normalise();
       render();
-      schedulePush("Changed total lessons to " + state.sessions, true);
+      schedulePush(
+        "Changed " + (field === "sessions" ? "total lessons" : "lessons per week") +
+        " to " + value,
+        true
+      );
+      return true;
+    }
+
+    function changeSessions(value) {
+      applyPlanSetting("sessions", value);
     }
 
     function changeLessonsPerWeek(value) {
-      state.lessonsPerWeek = Math.max(1, Math.min(2, Number(value) || 2));
-      render();
-      schedulePush("Changed lessons per week to " + state.lessonsPerWeek, true);
+      applyPlanSetting("lessonsPerWeek", value);
     }
 
     function validate() {
