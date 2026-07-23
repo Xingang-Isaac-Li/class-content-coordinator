@@ -13,13 +13,13 @@
     {
       "items": [
         {
-          "unit": "",
-          "topic": "Introduction",
+          "unit": "Unit 1",
+          "topic": "Welcome, intros, Acknowledgement",
           "minutes": 15,
           "teacher": "Xingang"
         },
         {
-          "unit": "",
+          "unit": "Unit 1",
           "topic": "Core concept",
           "minutes": 25,
           "teacher": "Bharat"
