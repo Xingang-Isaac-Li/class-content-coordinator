@@ -7,7 +7,7 @@
     "Bharat",
     "Rowan"
   ],
-  "sessions": 6,
+  "sessions": 24,
   "lessonsPerWeek": 2,
   "lessons": [
     {
@@ -28,7 +28,7 @@
           "unit": "",
           "topic": "",
           "minutes": 20,
-          "teacher": "Rowan"
+          "teacher": ""
         }
       ]
     },
@@ -53,6 +53,60 @@
           "teacher": ""
         }
       ]
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
+    },
+    {
+      "items": []
     },
     {
       "items": []
