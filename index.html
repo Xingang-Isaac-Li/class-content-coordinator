@@ -302,8 +302,9 @@
     var CONFIG_KEY = "contentCoordinatorGithubConfig";
     var TOKEN_KEY = "contentCoordinatorGithubToken";
     var PLAN_PATH = "plan.json";
-    var POLL_MS = 3000;
-    var SAVE_DEBOUNCE_MS = 1200;
+    var POLL_MS = 5000;
+    var SAVE_DEBOUNCE_MS = 500;
+    var HISTORY_REFRESH_MS = 30000;
 
     var defaultState = {
       teachers: ["Teacher A", "Teacher B", "Teacher C"],
@@ -334,6 +335,9 @@
     var pendingCommitMessage = "";
     var isPushing = false;
     var pushRetryCount = 0;
+    var pushQueued = false;
+    var historyTimer = null;
+    var lastHistoryLoad = 0;
 
     try {
       var savedPlan = localStorage.getItem(STORAGE_KEY);
@@ -491,7 +495,7 @@
         }
 
         if (hasPendingSave() || hasLocalChanges()) {
-          setSyncStatus("pending", hasLocalChanges() ? "Saving your changes…" : "Upload in progress…");
+          setSyncStatus("pending", isPushing ? "Syncing…" : "Editing…");
           return;
         }
 
@@ -517,16 +521,26 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     }
 
-    function schedulePush(message) {
+    function schedulePush(message, immediate) {
       if (!isConnected()) return;
 
       pushRetryCount = 0;
       pendingCommitMessage = message;
-      setSyncStatus("pending", "Saving: " + message);
 
       if (saveTimer) clearTimeout(saveTimer);
+
+      if (immediate) {
+        saveTimer = null;
+        setSyncStatus("pending", "Syncing…");
+        pushToGitHub(pendingCommitMessage);
+        return;
+      }
+
+      setSyncStatus("pending", "Editing…");
+
       saveTimer = setTimeout(function () {
         saveTimer = null;
+        setSyncStatus("pending", "Syncing…");
         pushToGitHub(pendingCommitMessage);
       }, SAVE_DEBOUNCE_MS);
     }
@@ -553,14 +567,20 @@
     }
 
     async function pushToGitHub(message) {
-      if (!isConnected() || isPushing) return;
+      if (!isConnected()) return;
+
+      if (isPushing) {
+        pushQueued = true;
+        pendingCommitMessage = message;
+        return;
+      }
 
       isPushing = true;
       var pushedJson = stateJson();
       saveLocal();
 
       try {
-        await fetchRemoteSha();
+        if (!remoteSha) await fetchRemoteSha();
 
         var content = btoa(unescape(encodeURIComponent(JSON.stringify(JSON.parse(pushedJson), null, 2))));
 
@@ -581,7 +601,7 @@
         if (response.status === 409) {
           if (pushRetryCount < 2) {
             pushRetryCount += 1;
-            setSyncStatus("pending", "Retrying save…");
+            setSyncStatus("pending", "Syncing…");
             isPushing = false;
             await fetchRemoteSha();
             await pushToGitHub(message);
@@ -603,17 +623,33 @@
         syncedJson = pushedJson;
 
         if (stateJson() !== pushedJson) {
-          schedulePush("Continued edits");
+          schedulePush("Continued edits", true);
         } else {
-          setSyncStatus("live", "Saved to GitHub · " + new Date().toLocaleTimeString());
+          setSyncStatus("live", "Saved · " + new Date().toLocaleTimeString());
         }
 
-        loadHistory();
+        scheduleHistoryRefresh();
       } catch (error) {
         setSyncStatus("error", "Save failed: " + error.message);
       } finally {
         isPushing = false;
+
+        if (pushQueued) {
+          pushQueued = false;
+          schedulePush(pendingCommitMessage, true);
+        }
       }
+    }
+
+    function scheduleHistoryRefresh() {
+      var now = Date.now();
+      if (now - lastHistoryLoad < HISTORY_REFRESH_MS) return;
+
+      if (historyTimer) clearTimeout(historyTimer);
+      historyTimer = setTimeout(function () {
+        historyTimer = null;
+        loadHistory();
+      }, 2000);
     }
 
     async function loadHistory() {
@@ -649,6 +685,7 @@
             "<div class=\"history-meta\">" + escapeHTML(author) + " · " + date + "</div></li>"
           );
         }).join("");
+        lastHistoryLoad = Date.now();
       } catch (error) {}
     }
 
@@ -864,6 +901,14 @@
 
       saveLocal();
       validate();
+
+      if (field === "teacher") {
+        schedulePush(
+          "Updated teacher in " + describeLocation(lessonIndex, itemIndex) +
+          " to \"" + String(value).slice(0, 80) + "\"",
+          true
+        );
+      }
     }
 
     function addItem(lessonIndex) {
@@ -875,13 +920,13 @@
       });
 
       render();
-      schedulePush("Added content row in " + describeLocation(lessonIndex));
+      schedulePush("Added content row in " + describeLocation(lessonIndex), true);
     }
 
     function removeItem(lessonIndex, itemIndex) {
       state.lessons[lessonIndex].items.splice(itemIndex, 1);
       render();
-      schedulePush("Removed content row from " + describeLocation(lessonIndex, itemIndex));
+      schedulePush("Removed content row from " + describeLocation(lessonIndex, itemIndex), true);
     }
 
     function addTeacher() {
@@ -897,19 +942,19 @@
 
       state.teachers.push(name);
       render();
-      schedulePush("Added teacher \"" + name + "\"");
+      schedulePush("Added teacher \"" + name + "\"", true);
     }
 
     function changeSessions(value) {
       state.sessions = Math.max(1, Math.min(60, Number(value) || 6));
       render();
-      schedulePush("Changed total lessons to " + state.sessions);
+      schedulePush("Changed total lessons to " + state.sessions, true);
     }
 
     function changeLessonsPerWeek(value) {
       state.lessonsPerWeek = Math.max(1, Math.min(2, Number(value) || 2));
       render();
-      schedulePush("Changed lessons per week to " + state.lessonsPerWeek);
+      schedulePush("Changed lessons per week to " + state.lessonsPerWeek, true);
     }
 
     function validate() {
@@ -999,7 +1044,7 @@
 
       state = JSON.parse(JSON.stringify(defaultState));
       render();
-      schedulePush("Reset plan to default example");
+      schedulePush("Reset plan to default example", true);
     }
 
     render(false);
