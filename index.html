@@ -239,7 +239,7 @@
     <span class="sync-dot" id="syncDot"></span>
     <span id="syncStatus">Connect to GitHub to start syncing.</span>
     <button class="secondary small-button" onclick="toggleSetup()">GitHub setup</button>
-    <button class="secondary small-button" onclick="refreshFromGitHub()">Refresh now</button>
+    <button class="secondary small-button" onclick="refreshNow()">Refresh now</button>
     <a id="historyLink" class="small" href="#" target="_blank" rel="noopener">View commits on GitHub</a>
   </div>
 
@@ -328,12 +328,12 @@
     var githubConfig = { owner: "", repo: "", branch: "main", userName: "" };
     var githubToken = "";
     var remoteSha = null;
-    var remoteUpdatedAt = "";
+    var syncedJson = null;
     var pollTimer = null;
     var saveTimer = null;
     var pendingCommitMessage = "";
     var isPushing = false;
-    var skipNextPollApply = false;
+    var pushRetryCount = 0;
 
     try {
       var savedPlan = localStorage.getItem(STORAGE_KEY);
@@ -444,6 +444,22 @@
       loadHistory();
     }
 
+    function stateJson() {
+      return JSON.stringify(state);
+    }
+
+    function hasLocalChanges() {
+      return syncedJson !== null && stateJson() !== syncedJson;
+    }
+
+    function markSynced() {
+      syncedJson = stateJson();
+    }
+
+    function hasPendingSave() {
+      return !!(isPushing || saveTimer);
+    }
+
     async function refreshFromGitHub(forceApply, onlyUpdateSha) {
       if (!isConnected()) return;
 
@@ -462,37 +478,29 @@
 
         var payload = await response.json();
         remoteSha = payload.sha;
-        if (onlyUpdateSha) {
-          remoteUpdatedAt = payload.sha.slice(0, 8);
-          return;
-        }
+
+        if (onlyUpdateSha) return;
 
         var remoteState = JSON.parse(decodeURIComponent(escape(atob(payload.content.replace(/\n/g, "")))));
-        var remoteTime = payload.sha.slice(0, 8);
+        var remoteJson = JSON.stringify(remoteState);
 
-        if (forceApply || skipNextPollApply) {
-          skipNextPollApply = false;
+        if (forceApply) {
           applyRemoteState(remoteState);
           setSyncStatus("live", "Synced with GitHub · updated " + new Date().toLocaleTimeString());
           return;
         }
 
-        if (isPushing || saveTimer) {
-          setSyncStatus("pending", "Saving your changes…");
+        if (hasPendingSave() || hasLocalChanges()) {
+          setSyncStatus("pending", hasLocalChanges() ? "Saving your changes…" : "Upload in progress…");
           return;
         }
 
-        var localJson = JSON.stringify(state);
-        var remoteJson = JSON.stringify(remoteState);
-
-        if (localJson !== remoteJson && remoteUpdatedAt !== remoteTime) {
+        if (stateJson() !== remoteJson) {
           applyRemoteState(remoteState);
           setSyncStatus("live", "Updated from GitHub · " + new Date().toLocaleTimeString());
         } else {
           setSyncStatus("live", "Synced with GitHub · " + new Date().toLocaleTimeString());
         }
-
-        remoteUpdatedAt = remoteTime;
       } catch (error) {
         setSyncStatus("error", "Sync error: " + error.message);
       }
@@ -500,6 +508,7 @@
 
     function applyRemoteState(remoteState) {
       state = remoteState;
+      markSynced();
       saveLocal();
       render(false);
     }
@@ -511,6 +520,7 @@
     function schedulePush(message) {
       if (!isConnected()) return;
 
+      pushRetryCount = 0;
       pendingCommitMessage = message;
       setSyncStatus("pending", "Saving: " + message);
 
@@ -521,24 +531,38 @@
       }, SAVE_DEBOUNCE_MS);
     }
 
+    function refreshNow() {
+      if (hasLocalChanges() && !confirm("You have unsaved changes. Reload from GitHub anyway?")) return;
+      refreshFromGitHub(true);
+    }
+
+    async function fetchRemoteSha() {
+      var head = await fetch(apiUrl("/contents/" + PLAN_PATH + "?ref=" + githubConfig.branch), {
+        headers: githubHeaders()
+      });
+
+      if (head.status === 404) {
+        remoteSha = null;
+        return;
+      }
+
+      if (!head.ok) throw new Error("Could not read plan version (" + head.status + ")");
+
+      var headPayload = await head.json();
+      remoteSha = headPayload.sha;
+    }
+
     async function pushToGitHub(message) {
       if (!isConnected() || isPushing) return;
 
       isPushing = true;
+      var pushedJson = stateJson();
       saveLocal();
 
       try {
-        if (!remoteSha) {
-          var head = await fetch(apiUrl("/contents/" + PLAN_PATH + "?ref=" + githubConfig.branch), {
-            headers: githubHeaders()
-          });
-          if (head.ok) {
-            var headPayload = await head.json();
-            remoteSha = headPayload.sha;
-          }
-        }
+        await fetchRemoteSha();
 
-        var content = btoa(unescape(encodeURIComponent(JSON.stringify(state, null, 2))));
+        var content = btoa(unescape(encodeURIComponent(JSON.stringify(JSON.parse(pushedJson), null, 2))));
 
         var body = {
           message: githubConfig.userName + ": " + message,
@@ -555,19 +579,19 @@
         });
 
         if (response.status === 409) {
-          // GitHub returns 409 when the supplied sha is stale (non-fast-forward update).
-          // This can happen even with a single user (e.g., after a refresh or another write updated the sha).
-          // We should refresh the remote SHA, but NOT overwrite the current local edits.
-          setSyncStatus("pending", "Remote changed — retrying save…");
-          await refreshFromGitHub(false, /*onlyUpdateSha*/ true);
-          remoteSha = remoteSha; // (updated inside refresh)
-          // Retry once with the new sha.
-          isPushing = false;
-          await pushToGitHub(message + " (retry)");
-          return;
-          alert("Another user saved changes at the same time. The latest version has been loaded. Please redo your last edit if needed.");
-          return;
+          if (pushRetryCount < 2) {
+            pushRetryCount += 1;
+            setSyncStatus("pending", "Retrying save…");
+            isPushing = false;
+            await fetchRemoteSha();
+            await pushToGitHub(message);
+            return;
+          }
+
+          throw new Error("Could not save — please click Refresh now, then try again.");
         }
+
+        pushRetryCount = 0;
 
         if (!response.ok) {
           var err = await response.json().catch(function () { return {}; });
@@ -576,8 +600,14 @@
 
         var result = await response.json();
         remoteSha = result.content.sha;
-        remoteUpdatedAt = remoteSha.slice(0, 8);
-        setSyncStatus("live", "Saved to GitHub · " + new Date().toLocaleTimeString());
+        syncedJson = pushedJson;
+
+        if (stateJson() !== pushedJson) {
+          schedulePush("Continued edits");
+        } else {
+          setSyncStatus("live", "Saved to GitHub · " + new Date().toLocaleTimeString());
+        }
+
         loadHistory();
       } catch (error) {
         setSyncStatus("error", "Save failed: " + error.message);
@@ -832,11 +862,8 @@
         state.lessons[lessonIndex].items[itemIndex][field] = value;
       }
 
+      saveLocal();
       validate();
-      schedulePush(
-        "Updated " + describeField(field) + " in " + describeLocation(lessonIndex, itemIndex) +
-        " to \"" + String(value).slice(0, 80) + "\""
-      );
     }
 
     function addItem(lessonIndex) {
