@@ -20,9 +20,15 @@
         },
         {
           "unit": "Unit 1",
-          "topic": "Discussion",
+          "topic": "Discussion: grade, pro skills",
           "minutes": 25,
           "teacher": "Bharat"
+        },
+        {
+          "unit": "",
+          "topic": "Subject overview",
+          "minutes": 20,
+          "teacher": ""
         },
         {
           "unit": "",
