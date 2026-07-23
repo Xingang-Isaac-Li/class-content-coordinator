@@ -444,7 +444,7 @@
       loadHistory();
     }
 
-    async function refreshFromGitHub(forceApply) {
+    async function refreshFromGitHub(forceApply, onlyUpdateSha) {
       if (!isConnected()) return;
 
       try {
@@ -462,6 +462,10 @@
 
         var payload = await response.json();
         remoteSha = payload.sha;
+        if (onlyUpdateSha) {
+          remoteUpdatedAt = payload.sha.slice(0, 8);
+          return;
+        }
 
         var remoteState = JSON.parse(decodeURIComponent(escape(atob(payload.content.replace(/\n/g, "")))));
         var remoteTime = payload.sha.slice(0, 8);
@@ -551,9 +555,16 @@
         });
 
         if (response.status === 409) {
-          setSyncStatus("error", "Someone else saved first — refreshing…");
-          skipNextPollApply = true;
-          await refreshFromGitHub(true);
+          // GitHub returns 409 when the supplied sha is stale (non-fast-forward update).
+          // This can happen even with a single user (e.g., after a refresh or another write updated the sha).
+          // We should refresh the remote SHA, but NOT overwrite the current local edits.
+          setSyncStatus("pending", "Remote changed — retrying save…");
+          await refreshFromGitHub(false, /*onlyUpdateSha*/ true);
+          remoteSha = remoteSha; // (updated inside refresh)
+          // Retry once with the new sha.
+          isPushing = false;
+          await pushToGitHub(message + " (retry)");
+          return;
           alert("Another user saved changes at the same time. The latest version has been loaded. Please redo your last edit if needed.");
           return;
         }
