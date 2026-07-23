@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Class Content Coordinator</title>
+  <style>
+    :root {
+      --blue: #2563eb;
+      --red: #fee2e2;
+      --border: #dbe3ef;
+      --text: #172033;
+      --green: #166534;
+      --amber: #92400e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 28px;
+      color: var(--text);
+      background: #f7f9fc;
+    }
+
+    h1 { margin-bottom: 4px; }
+    .sub { margin-top: 0; color: #526078; }
+
+    .toolbar, .warning, .week-section, .lesson-card, .sync-bar, .setup-panel, .history-panel {
+      background: white;
+      padding: 16px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px #00000012;
+    }
+
+    .sync-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      margin: 16px 0;
+      border: 1px solid var(--border);
+    }
+
+    .sync-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #94a3b8;
+      flex-shrink: 0;
+    }
+
+    .sync-dot.live { background: #22c55e; }
+    .sync-dot.pending { background: #f59e0b; }
+    .sync-dot.error { background: #ef4444; }
+
+    #syncStatus { flex: 1; min-width: 180px; font-size: 0.92rem; }
+
+    .setup-panel, .history-panel {
+      margin: 16px 0;
+      border: 1px solid var(--border);
+    }
+
+    .setup-panel h2, .history-panel h2 {
+      margin: 0 0 12px;
+      font-size: 1.05rem;
+      color: #1e3a8a;
+    }
+
+    .setup-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .setup-grid label {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 4px;
+      font-size: 0.88rem;
+      color: #526078;
+    }
+
+    .history-list {
+      max-height: 220px;
+      overflow-y: auto;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .history-list li {
+      padding: 8px 0;
+      border-bottom: 1px solid #eef2f7;
+      font-size: 0.88rem;
+    }
+
+    .history-list li:last-child { border-bottom: 0; }
+
+    .history-meta { color: #64748b; font-size: 0.82rem; }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .warning { margin: 16px 0; }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 9px 12px;
+      background: var(--blue);
+      color: white;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button:hover { filter: brightness(0.94); }
+    button.secondary { background: #64748b; }
+    button.danger { background: #dc2626; }
+    button.small-button { padding: 6px 9px; font-size: 0.85rem; }
+
+    label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    input, select {
+      padding: 7px;
+      border: 1px solid #cbd5e1;
+      border-radius: 5px;
+      background: white;
+    }
+
+    input[type="number"] { width: 75px; }
+    input[type="text"] { width: 100%; }
+
+    .week-section { margin: 20px 0; }
+
+    .week-title {
+      margin: 0 0 14px;
+      color: #1e3a8a;
+      font-size: 1.3rem;
+    }
+
+    .week-lessons {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .lesson-card {
+      min-width: 0;
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+
+    .lesson-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .lesson-header h2 {
+      margin: 0;
+      font-size: 1.1rem;
+      color: #1e3a8a;
+    }
+
+    .lesson-total {
+      color: #526078;
+      font-size: 0.9rem;
+      margin: 0 0 10px;
+    }
+
+    .table-wrap { overflow-x: auto; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 500px;
+    }
+
+    th {
+      background: #1e3a8a;
+      color: white;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    th, td {
+      border: 1px solid var(--border);
+      padding: 7px;
+      vertical-align: top;
+    }
+
+    td.topic { min-width: 160px; }
+    td.unit { min-width: 110px; }
+    td.teacher { min-width: 130px; }
+
+    .conflict { background: var(--red); }
+
+    #warnings {
+      color: #991b1b;
+      margin-top: 6px;
+    }
+
+    .small {
+      color: #64748b;
+      font-size: 0.85rem;
+    }
+
+    .hidden { display: none; }
+
+    @media (max-width: 900px) {
+      .week-lessons { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 600px) {
+      body { margin: 16px; }
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Class Content Coordinator</h1>
+  <p class="sub">Shared plan — every edit is saved to GitHub and visible to everyone in real time.</p>
+
+  <div class="sync-bar">
+    <span class="sync-dot" id="syncDot"></span>
+    <span id="syncStatus">Connect to GitHub to start syncing.</span>
+    <button class="secondary small-button" onclick="toggleSetup()">GitHub setup</button>
+    <button class="secondary small-button" onclick="refreshFromGitHub()">Refresh now</button>
+    <a id="historyLink" class="small" href="#" target="_blank" rel="noopener">View commits on GitHub</a>
+  </div>
+
+  <div id="setupPanel" class="setup-panel">
+    <h2>GitHub connection</h2>
+    <p class="small">Form data is stored in <code>plan.json</code> in your repo. Each save creates a Git commit — that is your change history.</p>
+    <div class="setup-grid">
+      <label>
+        GitHub username or org
+        <input id="cfgOwner" type="text" placeholder="e.g. jane-smith">
+      </label>
+      <label>
+        Repository name
+        <input id="cfgRepo" type="text" placeholder="e.g. class-content-coordinator">
+      </label>
+      <label>
+        Your name (shown in change log)
+        <input id="cfgUserName" type="text" placeholder="e.g. Jane Smith">
+      </label>
+      <label>
+        Personal access token
+        <input id="cfgToken" type="password" placeholder="ghp_... (Contents read/write)">
+      </label>
+    </div>
+    <button onclick="saveSetup()">Save &amp; connect</button>
+    <p class="small">Create a token at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained token → Repository access → this repo only → Permissions: <strong>Contents</strong> read &amp; write.</p>
+  </div>
+
+  <div id="historyPanel" class="history-panel hidden">
+    <h2>Recent changes</h2>
+    <ul id="historyList" class="history-list"></ul>
+  </div>
+
+  <div class="toolbar">
+    <button onclick="addTeacher()">+ Add teacher</button>
+
+    <label>
+      Total lessons:
+      <input id="sessionCount" type="number" min="1" max="60" onchange="changeSessions(this.value)">
+    </label>
+
+    <label>
+      Lessons per week:
+      <input id="lessonsPerWeek" type="number" min="1" max="2" onchange="changeLessonsPerWeek(this.value)">
+    </label>
+
+    <button class="secondary" onclick="exportCSV()">Export CSV for Excel</button>
+    <button class="danger" onclick="resetPlan()">Reset plan</button>
+  </div>
+
+  <div class="warning">
+    <strong>Schedule checks</strong>
+    <div id="warnings" class="small">No conflicts found.</div>
+  </div>
+
+  <div id="weekContainer"></div>
+
+  <script>
+    var STORAGE_KEY = "contentCoordinatorV3";
+    var CONFIG_KEY = "contentCoordinatorGithubConfig";
+    var TOKEN_KEY = "contentCoordinatorGithubToken";
+    var PLAN_PATH = "plan.json";
+    var POLL_MS = 3000;
+    var SAVE_DEBOUNCE_MS = 1200;
+
+    var defaultState = {
+      teachers: ["Teacher A", "Teacher B", "Teacher C"],
+      sessions: 6,
+      lessonsPerWeek: 2,
+      lessons: [
+        {
+          items: [
+            { unit: "Unit 1", topic: "Introduction", minutes: 15, teacher: "" },
+            { unit: "Unit 1", topic: "Core concept", minutes: 25, teacher: "" }
+          ]
+        },
+        {
+          items: [
+            { unit: "Unit 1", topic: "Activity / discussion", minutes: 30, teacher: "" }
+          ]
+        }
+      ]
+    };
+
+    var state;
+    var githubConfig = { owner: "", repo: "", branch: "main", userName: "" };
+    var githubToken = "";
+    var remoteSha = null;
+    var remoteUpdatedAt = "";
+    var pollTimer = null;
+    var saveTimer = null;
+    var pendingCommitMessage = "";
+    var isPushing = false;
+    var skipNextPollApply = false;
+
+    try {
+      var savedPlan = localStorage.getItem(STORAGE_KEY);
+      state = savedPlan ? JSON.parse(savedPlan) : JSON.parse(JSON.stringify(defaultState));
+    } catch (error) {
+      state = JSON.parse(JSON.stringify(defaultState));
+    }
+
+    loadConfigFromStorage();
+    applyUrlParams();
+    fillSetupForm();
+    updateHistoryLink();
+
+    function loadConfigFromStorage() {
+      try {
+        var saved = localStorage.getItem(CONFIG_KEY);
+        if (saved) githubConfig = JSON.parse(saved);
+      } catch (error) {}
+
+      githubToken = sessionStorage.getItem(TOKEN_KEY) || "";
+    }
+
+    function applyUrlParams() {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("owner")) githubConfig.owner = params.get("owner");
+      if (params.get("repo")) githubConfig.repo = params.get("repo");
+    }
+
+    function fillSetupForm() {
+      document.getElementById("cfgOwner").value = githubConfig.owner || "";
+      document.getElementById("cfgRepo").value = githubConfig.repo || "";
+      document.getElementById("cfgUserName").value = githubConfig.userName || "";
+      document.getElementById("cfgToken").value = githubToken || "";
+    }
+
+    function saveSetup() {
+      githubConfig.owner = document.getElementById("cfgOwner").value.trim();
+      githubConfig.repo = document.getElementById("cfgRepo").value.trim();
+      githubConfig.userName = document.getElementById("cfgUserName").value.trim();
+      githubToken = document.getElementById("cfgToken").value.trim();
+
+      if (!githubConfig.owner || !githubConfig.repo || !githubConfig.userName || !githubToken) {
+        alert("Please fill in all four fields.");
+        return;
+      }
+
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(githubConfig));
+      sessionStorage.setItem(TOKEN_KEY, githubToken);
+
+      document.getElementById("setupPanel").classList.add("hidden");
+      updateHistoryLink();
+      startSync();
+    }
+
+    function toggleSetup() {
+      document.getElementById("setupPanel").classList.toggle("hidden");
+    }
+
+    function isConnected() {
+      return !!(githubConfig.owner && githubConfig.repo && githubToken && githubConfig.userName);
+    }
+
+    function updateHistoryLink() {
+      var link = document.getElementById("historyLink");
+      if (!githubConfig.owner || !githubConfig.repo) {
+        link.href = "#";
+        return;
+      }
+
+      link.href =
+        "https://github.com/" + encodeURIComponent(githubConfig.owner) +
+        "/" + encodeURIComponent(githubConfig.repo) +
+        "/commits/main/" + PLAN_PATH;
+    }
+
+    function setSyncStatus(kind, message) {
+      var dot = document.getElementById("syncDot");
+      dot.className = "sync-dot" + (kind ? " " + kind : "");
+      document.getElementById("syncStatus").textContent = message;
+    }
+
+    function githubHeaders() {
+      return {
+        Accept: "application/vnd.github+json",
+        Authorization: "Bearer " + githubToken,
+        "X-GitHub-Api-Version": "2022-11-28"
+      };
+    }
+
+    function apiUrl(path) {
+      return "https://api.github.com/repos/" +
+        encodeURIComponent(githubConfig.owner) + "/" +
+        encodeURIComponent(githubConfig.repo) + path;
+    }
+
+    function startSync() {
+      if (!isConnected()) {
+        setSyncStatus("", "Connect to GitHub to start syncing.");
+        return;
+      }
+
+      setSyncStatus("pending", "Connecting to GitHub…");
+      refreshFromGitHub(true);
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(function () {
+        refreshFromGitHub(false);
+      }, POLL_MS);
+      loadHistory();
+    }
+
+    async function refreshFromGitHub(forceApply) {
+      if (!isConnected()) return;
+
+      try {
+        var response = await fetch(apiUrl("/contents/" + PLAN_PATH + "?ref=" + githubConfig.branch), {
+          headers: githubHeaders()
+        });
+
+        if (response.status === 404) {
+          setSyncStatus("pending", "plan.json not found — saving initial plan…");
+          await pushToGitHub("Initial plan created by " + githubConfig.userName);
+          return;
+        }
+
+        if (!response.ok) throw new Error("Could not load plan (" + response.status + ")");
+
+        var payload = await response.json();
+        remoteSha = payload.sha;
+
+        var remoteState = JSON.parse(decodeURIComponent(escape(atob(payload.content.replace(/\n/g, "")))));
+        var remoteTime = payload.sha.slice(0, 8);
+
+        if (forceApply || skipNextPollApply) {
+          skipNextPollApply = false;
+          applyRemoteState(remoteState);
+          setSyncStatus("live", "Synced with GitHub · updated " + new Date().toLocaleTimeString());
+          return;
+        }
+
+        if (isPushing || saveTimer) {
+          setSyncStatus("pending", "Saving your changes…");
+          return;
+        }
+
+        var localJson = JSON.stringify(state);
+        var remoteJson = JSON.stringify(remoteState);
+
+        if (localJson !== remoteJson && remoteUpdatedAt !== remoteTime) {
+          applyRemoteState(remoteState);
+          setSyncStatus("live", "Updated from GitHub · " + new Date().toLocaleTimeString());
+        } else {
+          setSyncStatus("live", "Synced with GitHub · " + new Date().toLocaleTimeString());
+        }
+
+        remoteUpdatedAt = remoteTime;
+      } catch (error) {
+        setSyncStatus("error", "Sync error: " + error.message);
+      }
+    }
+
+    function applyRemoteState(remoteState) {
+      state = remoteState;
+      saveLocal();
+      render(false);
+    }
+
+    function saveLocal() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function schedulePush(message) {
+      if (!isConnected()) return;
+
+      pendingCommitMessage = message;
+      setSyncStatus("pending", "Saving: " + message);
+
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () {
+        saveTimer = null;
+        pushToGitHub(pendingCommitMessage);
+      }, SAVE_DEBOUNCE_MS);
+    }
+
+    async function pushToGitHub(message) {
+      if (!isConnected() || isPushing) return;
+
+      isPushing = true;
+      saveLocal();
+
+      try {
+        if (!remoteSha) {
+          var head = await fetch(apiUrl("/contents/" + PLAN_PATH + "?ref=" + githubConfig.branch), {
+            headers: githubHeaders()
+          });
+          if (head.ok) {
+            var headPayload = await head.json();
+            remoteSha = headPayload.sha;
+          }
+        }
+
+        var content = btoa(unescape(encodeURIComponent(JSON.stringify(state, null, 2))));
+
+        var body = {
+          message: githubConfig.userName + ": " + message,
+          content: content,
+          branch: githubConfig.branch
+        };
+
+        if (remoteSha) body.sha = remoteSha;
+
+        var response = await fetch(apiUrl("/contents/" + PLAN_PATH), {
+          method: "PUT",
+          headers: Object.assign({ "Content-Type": "application/json" }, githubHeaders()),
+          body: JSON.stringify(body)
+        });
+
+        if (response.status === 409) {
+          setSyncStatus("error", "Someone else saved first — refreshing…");
+          skipNextPollApply = true;
+          await refreshFromGitHub(true);
+          alert("Another user saved changes at the same time. The latest version has been loaded. Please redo your last edit if needed.");
+          return;
+        }
+
+        if (!response.ok) {
+          var err = await response.json().catch(function () { return {}; });
+          throw new Error(err.message || "Save failed (" + response.status + ")");
+        }
+
+        var result = await response.json();
+        remoteSha = result.content.sha;
+        remoteUpdatedAt = remoteSha.slice(0, 8);
+        setSyncStatus("live", "Saved to GitHub · " + new Date().toLocaleTimeString());
+        loadHistory();
+      } catch (error) {
+        setSyncStatus("error", "Save failed: " + error.message);
+      } finally {
+        isPushing = false;
+      }
+    }
+
+    async function loadHistory() {
+      if (!isConnected()) return;
+
+      try {
+        var response = await fetch(
+          apiUrl("/commits?path=" + encodeURIComponent(PLAN_PATH) + "&per_page=15"),
+          { headers: githubHeaders() }
+        );
+
+        if (!response.ok) return;
+
+        var commits = await response.json();
+        var list = document.getElementById("historyList");
+        var panel = document.getElementById("historyPanel");
+
+        if (!commits.length) {
+          panel.classList.add("hidden");
+          return;
+        }
+
+        panel.classList.remove("hidden");
+        list.innerHTML = commits.map(function (commit) {
+          var date = new Date(commit.commit.author.date).toLocaleString();
+          var author = commit.commit.author.name;
+          var msg = commit.commit.message;
+          var url = commit.html_url;
+
+          return (
+            "<li><a href=\"" + url + "\" target=\"_blank\" rel=\"noopener\">" +
+            escapeHTML(msg) + "</a>" +
+            "<div class=\"history-meta\">" + escapeHTML(author) + " · " + date + "</div></li>"
+          );
+        }).join("");
+      } catch (error) {}
+    }
+
+    function describeField(field) {
+      if (field === "unit") return "unit";
+      if (field === "topic") return "topic";
+      if (field === "minutes") return "minutes";
+      if (field === "teacher") return "teacher";
+      return field;
+    }
+
+    function describeLocation(lessonIndex, itemIndex) {
+      return "Week " + weekNumber(lessonIndex) + " " + lessonLabel(lessonIndex) +
+        (itemIndex !== undefined ? " row " + (itemIndex + 1) : "");
+    }
+
+    function normalise() {
+      state.sessions = Math.max(1, Math.min(60, Number(state.sessions) || 6));
+      state.lessonsPerWeek = Math.max(1, Math.min(2, Number(state.lessonsPerWeek) || 2));
+
+      if (!Array.isArray(state.teachers)) state.teachers = [];
+      if (!Array.isArray(state.lessons)) state.lessons = [];
+
+      while (state.lessons.length < state.sessions) {
+        state.lessons.push({ items: [] });
+      }
+
+      state.lessons = state.lessons.slice(0, state.sessions);
+
+      state.lessons.forEach(function (lesson) {
+        if (!Array.isArray(lesson.items)) lesson.items = [];
+
+        lesson.items.forEach(function (item) {
+          if (item.unit === undefined || item.unit === null) item.unit = "";
+          if (item.topic === undefined || item.topic === null) item.topic = "";
+          if (item.teacher === undefined || item.teacher === null) item.teacher = "";
+          item.minutes = Math.max(0, Number(item.minutes) || 0);
+        });
+      });
+    }
+
+    function escapeHTML(value) {
+      return String(value || "").replace(/[&<>"']/g, function (character) {
+        var replacements = {
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        };
+        return replacements[character];
+      });
+    }
+
+    function weekNumber(index) {
+      return Math.floor(index / state.lessonsPerWeek) + 1;
+    }
+
+    function lessonLabel(index) {
+      return "Lesson " + ((index % state.lessonsPerWeek) + 1);
+    }
+
+    function lessonMinutes(index) {
+      var total = 0;
+
+      state.lessons[index].items.forEach(function (item) {
+        total += Number(item.minutes) || 0;
+      });
+
+      return total;
+    }
+
+    function renderLesson(lesson, lessonIndex) {
+      var html = `
+        <section class="lesson-card">
+          <div class="lesson-header">
+            <h2>${lessonLabel(lessonIndex)}</h2>
+            <button class="small-button" onclick="addItem(${lessonIndex})">
+              + Add content item
+            </button>
+          </div>
+
+          <p class="lesson-total">
+            Total planned time: <strong>${lessonMinutes(lessonIndex)} minutes</strong>
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Unit</th>
+                  <th>Topic / class content</th>
+                  <th>Minutes</th>
+                  <th>Teacher</th>
+                  <th>Remove</th>
+                </tr>
+              </thead>
+              <tbody>
+      `;
+
+      if (lesson.items.length === 0) {
+        html += `<tr><td colspan="5" class="small">No content has been added yet.</td></tr>`;
+      }
+
+      lesson.items.forEach(function (item, itemIndex) {
+        var teacherOptions = `<option value="">— Select teacher —</option>`;
+
+        state.teachers.forEach(function (teacher) {
+          var selected = teacher === item.teacher ? "selected" : "";
+          teacherOptions += `
+            <option value="${escapeHTML(teacher)}" ${selected}>
+              ${escapeHTML(teacher)}
+            </option>
+          `;
+        });
+
+        html += `
+          <tr>
+            <td class="unit">
+              <input type="text" value="${escapeHTML(item.unit)}"
+                oninput="editItemLive(${lessonIndex}, ${itemIndex}, 'unit', this.value)"
+                onchange="editItem(${lessonIndex}, ${itemIndex}, 'unit', this.value)">
+            </td>
+            <td class="topic">
+              <input type="text" value="${escapeHTML(item.topic)}"
+                oninput="editItemLive(${lessonIndex}, ${itemIndex}, 'topic', this.value)"
+                onchange="editItem(${lessonIndex}, ${itemIndex}, 'topic', this.value)">
+            </td>
+            <td>
+              <input type="number" min="0" value="${item.minutes}"
+                oninput="editItemLive(${lessonIndex}, ${itemIndex}, 'minutes', this.value)"
+                onchange="editItem(${lessonIndex}, ${itemIndex}, 'minutes', this.value)">
+            </td>
+            <td class="teacher" data-lesson="${lessonIndex}" data-item="${itemIndex}">
+              <select onchange="editItem(${lessonIndex}, ${itemIndex}, 'teacher', this.value)">
+                ${teacherOptions}
+              </select>
+            </td>
+            <td>
+              <button class="danger small-button"
+                onclick="removeItem(${lessonIndex}, ${itemIndex})">×</button>
+            </td>
+          </tr>
+        `;
+      });
+
+      html += `
+              </tbody>
+            </table>
+          </div>
+        </section>
+      `;
+
+      return html;
+    }
+
+    function render(shouldSave) {
+      if (shouldSave === undefined) shouldSave = true;
+
+      normalise();
+
+      document.getElementById("sessionCount").value = state.sessions;
+      document.getElementById("lessonsPerWeek").value = state.lessonsPerWeek;
+
+      var html = "";
+
+      for (var weekStart = 0; weekStart < state.sessions; weekStart += state.lessonsPerWeek) {
+        var week = weekNumber(weekStart);
+
+        html += `
+          <section class="week-section">
+            <h2 class="week-title">Week ${week}</h2>
+            <div class="week-lessons">
+        `;
+
+        for (
+          var lessonIndex = weekStart;
+          lessonIndex < Math.min(weekStart + state.lessonsPerWeek, state.sessions);
+          lessonIndex++
+        ) {
+          html += renderLesson(state.lessons[lessonIndex], lessonIndex);
+        }
+
+        html += `</div></section>`;
+      }
+
+      document.getElementById("weekContainer").innerHTML = html;
+
+      validate();
+      if (shouldSave) saveLocal();
+    }
+
+    function editItemLive(lessonIndex, itemIndex, field, value) {
+      if (field === "minutes") {
+        state.lessons[lessonIndex].items[itemIndex][field] = Math.max(0, Number(value) || 0);
+      } else {
+        state.lessons[lessonIndex].items[itemIndex][field] = value;
+      }
+
+      saveLocal();
+      schedulePush(
+        "Updated " + describeField(field) + " in " + describeLocation(lessonIndex, itemIndex) +
+        " to \"" + String(value).slice(0, 80) + "\""
+      );
+    }
+
+    function editItem(lessonIndex, itemIndex, field, value) {
+      if (field === "minutes") {
+        state.lessons[lessonIndex].items[itemIndex][field] = Math.max(0, Number(value) || 0);
+      } else {
+        state.lessons[lessonIndex].items[itemIndex][field] = value;
+      }
+
+      validate();
+      schedulePush(
+        "Updated " + describeField(field) + " in " + describeLocation(lessonIndex, itemIndex) +
+        " to \"" + String(value).slice(0, 80) + "\""
+      );
+    }
+
+    function addItem(lessonIndex) {
+      state.lessons[lessonIndex].items.push({
+        unit: "",
+        topic: "",
+        minutes: 20,
+        teacher: ""
+      });
+
+      render();
+      schedulePush("Added content row in " + describeLocation(lessonIndex));
+    }
+
+    function removeItem(lessonIndex, itemIndex) {
+      state.lessons[lessonIndex].items.splice(itemIndex, 1);
+      render();
+      schedulePush("Removed content row from " + describeLocation(lessonIndex, itemIndex));
+    }
+
+    function addTeacher() {
+      var name = prompt("Enter the teacher's name:");
+      if (!name || !name.trim()) return;
+
+      name = name.trim();
+
+      if (state.teachers.indexOf(name) !== -1) {
+        alert("That teacher is already on the list.");
+        return;
+      }
+
+      state.teachers.push(name);
+      render();
+      schedulePush("Added teacher \"" + name + "\"");
+    }
+
+    function changeSessions(value) {
+      state.sessions = Math.max(1, Math.min(60, Number(value) || 6));
+      render();
+      schedulePush("Changed total lessons to " + state.sessions);
+    }
+
+    function changeLessonsPerWeek(value) {
+      state.lessonsPerWeek = Math.max(1, Math.min(2, Number(value) || 2));
+      render();
+      schedulePush("Changed lessons per week to " + state.lessonsPerWeek);
+    }
+
+    function validate() {
+      var cells = document.querySelectorAll(".conflict");
+
+      for (var c = 0; c < cells.length; c++) {
+        cells[c].classList.remove("conflict");
+      }
+
+      var problems = [];
+
+      state.lessons.forEach(function (lesson, lessonIndex) {
+        var assignments = {};
+
+        lesson.items.forEach(function (item, itemIndex) {
+          if (!item.teacher) return;
+
+          if (!assignments[item.teacher]) {
+            assignments[item.teacher] = [];
+          }
+
+          assignments[item.teacher].push(itemIndex);
+        });
+
+        Object.keys(assignments).forEach(function (teacher) {
+          var itemIndexes = assignments[teacher];
+
+          if (itemIndexes.length > 1) {
+            problems.push(
+              teacher + " is assigned to multiple items in Week " +
+              weekNumber(lessonIndex) + " – " + lessonLabel(lessonIndex) + "."
+            );
+
+            itemIndexes.forEach(function (itemIndex) {
+              var cell = document.querySelector(
+                `td[data-lesson="${lessonIndex}"][data-item="${itemIndex}"]`
+              );
+
+              if (cell) cell.classList.add("conflict");
+            });
+          }
+        });
+      });
+
+      document.getElementById("warnings").textContent = problems.length
+        ? problems.join(" ")
+        : "No teacher clashes found.";
+    }
+
+    function exportCSV() {
+      var rows = [[
+        "Week", "Lesson", "Unit", "Topic / class content", "Minutes", "Teacher"
+      ]];
+
+      state.lessons.forEach(function (lesson, lessonIndex) {
+        lesson.items.forEach(function (item) {
+          rows.push([
+            "Week " + weekNumber(lessonIndex),
+            lessonLabel(lessonIndex),
+            item.unit,
+            item.topic,
+            item.minutes,
+            item.teacher
+          ]);
+        });
+      });
+
+      var csv = rows.map(function (row) {
+        return row.map(function (value) {
+          return '"' + String(value || "").replace(/"/g, '""') + '"';
+        }).join(",");
+      }).join("\n");
+
+      var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      var url = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+
+      link.href = url;
+      link.download = "class-content-coordinator.csv";
+      link.click();
+
+      URL.revokeObjectURL(url);
+    }
+
+    function resetPlan() {
+      if (!confirm("Reset the shared plan to the example plan? This will save to GitHub for everyone.")) return;
+
+      state = JSON.parse(JSON.stringify(defaultState));
+      render();
+      schedulePush("Reset plan to default example");
+    }
+
+    render(false);
+
+    if (isConnected()) {
+      document.getElementById("setupPanel").classList.add("hidden");
+      startSync();
+    }
+  </script>
+</body>
+</html>

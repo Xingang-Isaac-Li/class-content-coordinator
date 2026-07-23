@@ -1,0 +1,18 @@
+{
+  "teachers": ["Teacher A", "Teacher B", "Teacher C"],
+  "sessions": 6,
+  "lessonsPerWeek": 2,
+  "lessons": [
+    {
+      "items": [
+        { "unit": "Unit 1", "topic": "Introduction", "minutes": 15, "teacher": "" },
+        { "unit": "Unit 1", "topic": "Core concept", "minutes": 25, "teacher": "" }
+      ]
+    },
+    {
+      "items": [
+        { "unit": "Unit 1", "topic": "Activity / discussion", "minutes": 30, "teacher": "" }
+      ]
+    }
+  ]
+}
