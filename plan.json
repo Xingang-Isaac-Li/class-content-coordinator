@@ -20,12 +20,6 @@
           "topic": "Core concept",
           "minutes": 25,
           "teacher": ""
-        },
-        {
-          "unit": "",
-          "topic": "",
-          "minutes": 20,
-          "teacher": ""
         }
       ]
     },
@@ -35,6 +29,12 @@
           "unit": "Unit 1",
           "topic": "Activity / discussion",
           "minutes": 30,
+          "teacher": ""
+        },
+        {
+          "unit": "",
+          "topic": "",
+          "minutes": 20,
           "teacher": ""
         }
       ]
