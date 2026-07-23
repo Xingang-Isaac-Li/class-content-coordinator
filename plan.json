@@ -13,31 +13,26 @@
     {
       "items": [
         {
-          "unit": "Unit 1",
           "topic": "Welcome, intros, Acknowledgement",
           "minutes": 5,
           "teacher": ""
         },
         {
-          "unit": "Unit 1",
           "topic": "Discussion: grades, professional skills ",
           "minutes": 20,
           "teacher": ""
         },
         {
-          "unit": "",
           "topic": "Subject overview ",
           "minutes": 20,
           "teacher": ""
         },
         {
-          "unit": "",
           "topic": "Intro to engineering design",
           "minutes": 20,
           "teacher": ""
         },
         {
-          "unit": "",
           "topic": "Activity: Design Afterthoughts ",
           "minutes": 35,
           "teacher": ""
@@ -47,19 +42,16 @@
     {
       "items": [
         {
-          "unit": "Unit 1",
-          "topic": "Activity / discussion",
+          "topic": "Intro to project challenge  ",
           "minutes": 30,
           "teacher": ""
         },
         {
-          "unit": "",
           "topic": "",
           "minutes": 20,
           "teacher": ""
         },
         {
-          "unit": "",
           "topic": "",
           "minutes": 20,
           "teacher": ""
