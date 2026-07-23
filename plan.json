@@ -117,7 +117,13 @@
       ]
     },
     {
-      "items": []
+      "items": [
+        {
+          "topic": "",
+          "minutes": 20,
+          "teacher": ""
+        }
+      ]
     },
     {
       "items": []
