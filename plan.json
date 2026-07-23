@@ -15,24 +15,30 @@
         {
           "unit": "Unit 1",
           "topic": "Welcome, intros, Acknowledgement",
-          "minutes": 15,
+          "minutes": 5,
           "teacher": "Xingang"
         },
         {
           "unit": "Unit 1",
-          "topic": "Discussion: grade, pro skills",
+          "topic": "Discussion: grades, professional skills ",
           "minutes": 25,
           "teacher": "Bharat"
         },
         {
           "unit": "",
-          "topic": "Subject overview",
+          "topic": "Subject overview ",
           "minutes": 20,
           "teacher": ""
         },
         {
           "unit": "",
-          "topic": "",
+          "topic": "Intro to engineering design",
+          "minutes": 20,
+          "teacher": ""
+        },
+        {
+          "unit": "",
+          "topic": "Activity: Design Afterthoughts ",
           "minutes": 20,
           "teacher": ""
         }
